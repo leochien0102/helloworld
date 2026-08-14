@@ -2934,10 +2934,19 @@ startup_check_probe() {
 		fi
 		;;
 	*)
-		if command -v timeout >/dev/null 2>&1; then
-			timeout 3 nslookup "$domain" "$host" >/dev/null 2>&1
+		# Prefer nslookup, which queries the configured server directly and so
+		# does not depend on /etc/resolv.conf being populated yet. busybox does
+		# not always ship the nslookup applet, so fall back to resolveip, which
+		# ships with netifd and is always present, resolving via the system
+		# resolver - the same path get_host_ip() relies on at startup.
+		if command -v nslookup >/dev/null 2>&1; then
+			if command -v timeout >/dev/null 2>&1; then
+				timeout 3 nslookup "$domain" "$host" >/dev/null 2>&1
+			else
+				nslookup "$domain" "$host" >/dev/null 2>&1
+			fi
 		else
-			nslookup "$domain" "$host" >/dev/null 2>&1
+			resolveip -4 -t 3 "$domain" >/dev/null 2>&1
 		fi
 		;;
 	esac

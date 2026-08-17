@@ -2930,7 +2930,11 @@ startup_check_probe() {
 
 	case "$method" in
 	ping)
-		ping -c1 -W2 "$host" >/dev/null 2>&1
+		if echo "$host" | grep -q ':'; then
+			ping6 -c1 -W2 "$host" >/dev/null 2>&1
+		else
+			ping -c1 -W2 "$host" >/dev/null 2>&1
+		fi
 		;;
 	*)
 		# Prefer nslookup, which queries the configured server directly and so
@@ -2957,6 +2961,8 @@ wait_for_internet() {
 	# Only gate the boot path: a manual restart must not block the LuCI UI.
 	[ "${SSR_BOOT:-0}" = "1" ] || return 0
 	[ "$(uci_get_by_type startup_check enabled 1)" = "1" ] || return 0
+	# 未配置主节点相当于未启用服务，没有需要解析的域名，无需等待
+	[ "$(uci_get_by_type global global_server nil)" != "nil" ] || return 0
 
 	hosts="$(uci_get_by_type startup_check host "223.5.5.5 119.29.29.29")"
 	# Unquoted on purpose: word splitting collapses a whitespace-only list to ""
@@ -2971,6 +2977,7 @@ wait_for_internet() {
 	# Guard against blank/invalid values left behind by the UI
 	echo "$max_retries" | grep -Eq '^[0-9]+$' || max_retries=30
 	echo "$interval" | grep -Eq '^[0-9]+$' || interval=2
+	[ "$interval" -lt 1 ] && interval=1
 	[ "$method" = "ping" ] || [ -n "$domain" ] || domain="www.baidu.com"
 
 	retry=0
@@ -2999,10 +3006,10 @@ start() {
 
 	set_lock
 	echolog "----------start------------"
-	wait_for_internet
 	mkdir -p /var/run /var/lock /var/log "$DNSMASQ_CONF_DIR" "$TMP_BIN_PATH" "$TMP_DNSMASQ_PATH" "$CLASH_CONFIG_DIR"
 	echo "conf-dir=${TMP_DNSMASQ_PATH}" >"$DNSMASQ_CONF_DIR/dnsmasq-ssrplus.conf"
 	check_run_environment
+	wait_for_internet
 	normalize_run_mode >/dev/null
 	normalize_xray_protocol_nodes
 

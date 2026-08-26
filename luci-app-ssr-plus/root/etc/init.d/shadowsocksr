@@ -1364,7 +1364,7 @@ start_dns() {
 				if [ "$USE_TABLES" = "iptables" ]; then
 					ln_start_bin "$(first_type chinadns-ng)" chinadns-ng -l "$china_dns_port" -4 china -p 3 $filtered_chinadns -t "127.0.0.1#$dns_port" -N -f -r --cache 4096 --cache-stale 86400 --cache-refresh 20 --verdict-cache 4096
 				elif [ "$USE_TABLES" = "nftables" ]; then
-					ln_start_bin "$(first_type chinadns-ng)" chinadns-ng -l "$china_dns_port" -4 inet@ss_spec@china -p 3 $filtered_chinadns -t "127.0.0.1#$dns_port" -N -f -r --cache 4096 --cache-stale 86400 --cache-refresh 20 --verdict-cache 4096
+					ln_start_bin "$(first_type chinadns-ng)" chinadns-ng -l "$china_dns_port" -4 inet@ss_spec@china -6 inet@ss_spec@china6 -p 3 $filtered_chinadns -t "127.0.0.1#$dns_port" -N -f -r --cache 4096 --cache-stale 86400 --cache-refresh 20 --verdict-cache 4096
 				fi
 
 				cat <<-EOF >> "$TMP_DNSMASQ_PATH/chinadns_fixed_server.conf"

@@ -861,6 +861,11 @@ tp_rule_nft() {
 
 	local MATCH_SET=""
 
+	# Per-rule port filter for the ss_spec_tproxy chain, mirroring what
+	# $PROXY_PORTS does on the iptables side. It must not be attached to the
+	# prerouting jump: the @gmlan rule inside the chain deliberately carries no
+	# port condition (game mode is meant to relay every UDP port), and a filter
+	# at the chain entry would stop those packets from ever reaching it.
 	if [ -n "$PROXY_PORTS" ]; then
 		PORTS_ARGS=$(echo "$PROXY_PORTS" | sed 's/-m multiport --dports //')
 		if [ -n "$PORTS_ARGS" ]; then
@@ -1010,9 +1015,9 @@ tp_rule_nft() {
 	if [ -z "$Interface" ]; then
 		# Global rules
 		if [ -n "$MATCH_SET" ]; then
-			$NFT add rule ip ss_spec_mangle prerouting meta l4proto udp $EXT_ARGS $MATCH_SET jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
+			$NFT add rule ip ss_spec_mangle prerouting meta l4proto udp $MATCH_SET jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
 		else
-			$NFT add rule ip ss_spec_mangle prerouting meta l4proto udp $EXT_ARGS jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
+			$NFT add rule ip ss_spec_mangle prerouting meta l4proto udp jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
 		fi
 	else
 		# Specific interface
@@ -1021,9 +1026,9 @@ tp_rule_nft() {
 			[ -z "$IFNAME" ] && IFNAME=$(uci -P /var/state get network."$name".device 2>/dev/null)
 			if [ -n "$IFNAME" ]; then
 				if [ -n "$MATCH_SET" ]; then
-					$NFT add rule ip ss_spec_mangle prerouting meta iifname "$IFNAME" meta l4proto udp $EXT_ARGS $MATCH_SET jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
+					$NFT add rule ip ss_spec_mangle prerouting meta iifname "$IFNAME" meta l4proto udp $MATCH_SET jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
 				else
-					$NFT add rule ip ss_spec_mangle prerouting meta iifname "$IFNAME" meta l4proto udp $EXT_ARGS jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
+					$NFT add rule ip ss_spec_mangle prerouting meta iifname "$IFNAME" meta l4proto udp jump ss_spec_tproxy comment "\"$TAG\"" 2>/dev/null
 				fi
 			fi
 		done

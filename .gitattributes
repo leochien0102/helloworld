@@ -1,0 +1,50 @@
+# OpenWrt feed 仓库：强制 LF 行尾，防护 Windows checkout (core.autocrlf=true)
+# 导致 shebang / 文本被注入 CRLF 而不可执行或解析失败。
+# text=auto eol=lf：仓库内全部文本文件统一 LF；无扩展名 shell 按目录显式锁定。
+* text=auto eol=lf
+
+# 脚本与源码
+*.sh        text eol=lf
+*.lua       text eol=lf
+*.c         text eol=lf
+*.h         text eol=lf
+*.rs        text eol=lf
+*.py        text eol=lf
+*.go        text eol=lf
+*.toml      text eol=lf
+*.json      text eol=lf
+*.po        text eol=lf
+*.pot       text eol=lf
+*.htm       text eol=lf
+*.html      text eol=lf
+*.mk        text eol=lf
+*.patch     text eol=lf
+*.diff      text eol=lf
+*.conf      text eol=lf
+*.config    text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+Makefile    text eol=lf
+
+# 无扩展名脚本目录（双保险）
+luci-app-ssr-plus/root/etc/init.d/*     text eol=lf
+luci-app-ssr-plus/root/etc/uci-defaults/* text eol=lf
+luci-app-ssr-plus/root/usr/bin/*        text eol=lf
+luci-app-ssr-plus/root/usr/share/*      text eol=lf
+luci-app-ssr-plus/root/etc/*.include    text eol=lf
+
+# 二进制（不做行尾处理）
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.tar   binary
+*.gz    binary
+*.xz    binary
+*.zip   binary
+*.7z    binary
+*.bin   binary
+*.so    binary
+*.ko    binary

@@ -825,6 +825,18 @@ ac_rule_iptables() {
 	return $?
 }
 
+# tproxy policy routing. It is torn down by flush_r and is not part of the
+# nftables ruleset file, so every start path has to (re)create it.
+tp_route_add() {
+	if ! ip rule show | grep -Eq "fwmark ${FWMARK}.*lookup 999"; then
+		ip rule add fwmark ${FWMARK} table 999 priority 999 2>/dev/null
+	fi
+
+	if ! ip route show table 999 | grep -Eq "^local.*dev lo"; then
+		ip route add local 0.0.0.0/0 dev lo table 999 2>/dev/null
+	fi
+}
+
 tp_rule() {
 	[ -n "$TPROXY" ] || return 0
 
@@ -840,14 +852,7 @@ tp_rule() {
 }
 
 tp_rule_nft() {
-	# set up routing table for tproxy
-	if ! ip rule show | grep -Eq "fwmark ${FWMARK}.*lookup 999"; then
-		ip rule add fwmark ${FWMARK} table 999 priority 999 2>/dev/null
-	fi
-
-	if ! ip route show table 999 | grep -Eq "^local.*dev lo"; then
-		ip route add local 0.0.0.0/0 dev lo table 999 2>/dev/null
-	fi
+	tp_route_add
 
 	# create mangle table and tproxy chain
 	if ! $NFT list table ip ss_spec_mangle >/dev/null 2>&1; then
@@ -909,6 +914,17 @@ tp_rule_nft() {
 	if [ -f "${xhttp_ip:=/etc/ssrplus/xhttp_address.txt}" ]; then
 		$NFT add element ip ss_spec_mangle whitelist "{ $(tr '\n' ',' < "${xhttp_ip}" | sed 's/,$//') }" 2>/dev/null
 	fi
+
+	# Add IP addresses to sets (mirrors the inet ss_spec table above)
+	for ip in $LAN_GM_IP; do
+		[ -n "$ip" ] && $NFT add element ip ss_spec_mangle gmlan "{ $ip }" 2>/dev/null
+	done
+	for ip in $LAN_FP_IP; do
+		[ -n "$ip" ] && $NFT add element ip ss_spec_mangle fplan "{ $ip }" 2>/dev/null
+	done
+	for ip in $LAN_BP_IP; do
+		[ -n "$ip" ] && $NFT add element ip ss_spec_mangle bplan "{ $ip }" 2>/dev/null
+	done
 
 	# use priority mangle for compatibility with other rules
 	if ! $NFT list chain ip ss_spec_mangle ss_spec_tproxy >/dev/null 2>&1; then
@@ -1017,14 +1033,7 @@ tp_rule_nft() {
 }
 
 tp_rule_iptables() {
-	# set up routing table for tproxy
-	if ! ip rule show | grep -Eq "fwmark ${FWMARK}.*lookup 999"; then
-		ip rule add fwmark ${FWMARK} table 999 priority 999 2>/dev/null
-	fi
-
-	if ! ip route show table 999 | grep -Eq "^local.*dev lo"; then
-		ip route add local 0.0.0.0/0 dev lo table 999 2>/dev/null
-	fi
+	tp_route_add
 	$ipt -N SS_SPEC_TPROXY 2>/dev/null
 	$ipt -F SS_SPEC_TPROXY
 
@@ -1455,6 +1464,9 @@ restore_from_persistence() {
 
 	# Restore rules from file
 	if $NFT -f "$NFTABLES_RULES_FILE" 2>/dev/null; then
+		# flush_r dropped the tproxy policy routing and the ruleset file does
+		# not carry it, so it has to be recreated here as well
+		tp_route_add
 		loger 5 "Rules restored successfully from persistence file"
 		return 0
 	else

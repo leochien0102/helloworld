@@ -53,9 +53,26 @@ if [ "$USE_NFT" = "1" ]; then
 	# NFTables persistence directory
 	NFTABLES_RULES_DIR="/usr/share/nftables.d/ruleset-post"
 	NFTABLES_RULES_FILE="$NFTABLES_RULES_DIR/99-shadowsocksr.nft"
+	# init.d moves the persistence file aside while the service is stopped and
+	# moves it back before invoking this script. Every path that discards the
+	# persistence file must discard that backup too: otherwise the next start
+	# copies the stale ruleset back over the one just rebuilt, and -- because
+	# the state snapshot has already advanced -- all later starts take the
+	# restore fast path and replay the stale ruleset forever.
+	NFTABLES_BACKUP_DIR="/etc/ssrplus/ssrplus-persist"
+	NFTABLES_BACKUP_FILE="$NFTABLES_BACKUP_DIR/99-shadowsocksr.save"
 	# Auto-update configuration
 	AUTO_UPDATE_INTERVAL=300  # auto-update check interval (seconds), 0 means disable
 fi
+
+# Discard the persistence file together with the backup kept by init.d.
+rm_persistence() {
+	[ "$USE_NFT" = "1" ] || return 0
+	rm -f "$NFTABLES_RULES_FILE" 2>/dev/null
+	rm -f "$NFTABLES_BACKUP_FILE" 2>/dev/null
+	rmdir "$NFTABLES_BACKUP_DIR" 2>/dev/null
+	return 0
+}
 
 # Modified usage function
 usage() {
@@ -163,8 +180,8 @@ cleanup_persistence_files() {
 	fi
 
 	# Remove persistence rule file
-	if [ -f "$NFTABLES_RULES_FILE" ]; then
-		rm -f "$NFTABLES_RULES_FILE" 2>/dev/null
+	if [ -f "$NFTABLES_RULES_FILE" ] || [ -f "$NFTABLES_BACKUP_FILE" ]; then
+		rm_persistence
 		loger 5 "Removed persistence file: $NFTABLES_RULES_FILE"
 	fi
 
@@ -1292,7 +1309,7 @@ persist_nftables_rules() {
 	# Force update: skip comparison check and delete old file
 	if [ "$FORCE_UPDATE" = "1" ]; then
 		loger 6 "Force update requested, removing old persistence file"
-		rm -f "$NFTABLES_RULES_FILE" 2>/dev/null
+		rm_persistence
 	# Otherwise, if persistence file exists, compare rules
 	elif [ -f "$NFTABLES_RULES_FILE" ]; then
 		if compare_rules; then
@@ -1351,7 +1368,7 @@ persist_nftables_rules() {
 	# Check if rules were exported successfully
 	if [ $HAS_RULES -eq 0 ] || [ ! -s "$NFTABLES_RULES_FILE" ] || ! grep -q "table" "$NFTABLES_RULES_FILE" 2>/dev/null; then
 		loger 4 "No ss_spec nftables rules found to persist"
-		rm -f "$NFTABLES_RULES_FILE" 2>/dev/null
+		rm_persistence
 		return 1
 	fi
 
@@ -1438,7 +1455,7 @@ force_update_persistence() {
 	fi
 
 	# Remove existing rule file to ensure recreation
-	rm -f "$NFTABLES_RULES_FILE" 2>/dev/null
+	rm_persistence
 
 	# Call persistence function
 	if persist_nftables_rules; then
@@ -1895,7 +1912,7 @@ if [ -n "$local_port" ]; then
 		   [ "$ANY_IP_LIST_CHANGED" = "1" ]; then
 			FORCE_RECREATE=1
 			loger 6 "TPROXY, PROXY_PORTS or any IP list changed → force rebuild rules"
-			rm -f "$NFTABLES_RULES_FILE" 2>/dev/null
+			rm_persistence
 		else
 			# No FORCE_RECREATE triggered → check persistence file
 			if [ -f "$NFTABLES_RULES_FILE" ] && [ -s "$NFTABLES_RULES_FILE" ]; then
@@ -1907,7 +1924,12 @@ if [ -n "$local_port" ]; then
 			fi
 		fi
 
-		# STEP 4: Save current state
+		# STEP 4: Define the state snapshot. It is written only after the rules
+		# are actually in place (STEP 7/8/9), never here: recording it up front
+		# lets a failed -- or externally clobbered -- rebuild leave the state
+		# ahead of the ruleset, and every later start then sees "unchanged",
+		# takes the restore fast path, and replays the stale ruleset for good.
+		save_rule_state() {
 		echo "$TPROXY" > "$TPROXY_STATE_FILE"
 		echo "$PROXY_PORTS" > "$PROXY_PORTS_STATE_FILE"
 		echo "$(normalize_ip_list "$WAN_BP_IP")" > "$WAN_BP_IP_STATE_FILE"
@@ -1918,6 +1940,7 @@ if [ -n "$local_port" ]; then
 		echo "$(normalize_ip_list "$LAN_GM_IP")" > "$LAN_GM_IP_STATE_FILE"
 		echo "$XHTTP_FILE_EXISTS" > "$XHTTP_FILE_STATE_FILE"
 		echo "$XHTTP_FILE_HASH" > "$XHTTP_FILE_HASH_FILE"
+		}
 
 		# STEP 5: Check if run mode changed
 		if runmode_change "$RUNMODE"; then
@@ -1931,7 +1954,7 @@ if [ -n "$local_port" ]; then
 		# STEP 6: Mode changed and persistence exists → delete once
 		if [ "$MODE_CHANGED" = "1" ] && [ "$PERSISTENCE_EXISTS" = "1" ]; then
 			loger 6 "Mode changed → removing persistence file"
-			rm -f "$NFTABLES_RULES_FILE"
+			rm_persistence
 			PERSISTENCE_EXISTS=0
 		fi
 
@@ -1941,6 +1964,7 @@ if [ -n "$local_port" ]; then
 			if flush_r && ipset_r && fw_rule && ac_rule && tp_rule && gen_include; then
 				loger 5 "NFT rules applied successfully (forced rebuild)"
 				persist_nftables_rules
+				save_rule_state
 				[ "$ENABLE_AUTO_UPDATE" = "1" ] && start_auto_update_daemon
 				exit 0
 			else
@@ -1955,6 +1979,7 @@ if [ -n "$local_port" ]; then
 			if restore_from_persistence; then
 				loger 5 "NFT rules restored from persistence"
 				gen_include
+				save_rule_state
 				[ "$ENABLE_AUTO_UPDATE" = "1" ] && start_auto_update_daemon
 				exit 0
 			else
@@ -1967,6 +1992,7 @@ if [ -n "$local_port" ]; then
 		if flush_r && ipset_r && fw_rule && ac_rule && tp_rule && gen_include; then
 			loger 5 "NFTables rules applied successfully"
 			persist_nftables_rules
+			save_rule_state
 			[ "$ENABLE_AUTO_UPDATE" = "1" ] && start_auto_update_daemon
 			exit 0
 		else

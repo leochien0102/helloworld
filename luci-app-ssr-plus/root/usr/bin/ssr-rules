@@ -1487,8 +1487,12 @@ restore_from_persistence() {
 	# Restore rules from file
 	if $NFT -f "$NFTABLES_RULES_FILE" 2>/dev/null; then
 		# flush_r dropped the tproxy policy routing and the ruleset file does
-		# not carry it, so it has to be recreated here as well
+		# not carry it, so it has to be recreated here as well. The same goes
+		# for the sysctl side: this path never reaches tp_rule(), so anything
+		# that re-applies rp_filter=1 between two starts would leave the
+		# restored tproxy rules silently dropping packets.
 		tp_route_add
+		set_tproxy_sysctl
 		loger 5 "Rules restored successfully from persistence file"
 		return 0
 	else

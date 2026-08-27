@@ -25,7 +25,8 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 			width: min(900px, calc(100vw - 32px));
 			max-height: min(720px, calc(100vh - 80px));
 			overflow: auto;
-			background: #fff;
+			background: var(--background-color-high, var(--card-bg, var(--background-color, #fff)));
+			border: 1px solid var(--border-color-low, var(--border-color, var(--gray, rgba(0, 0, 0, 0.08))));
 			border-radius: 10px;
 			box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
 			z-index: 2001;
@@ -43,12 +44,10 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 		#ssr-subscribe-modal-title {
 			font-size: 17px;
 			font-weight: 600;
-			color: #333;
 		}
 
 		#ssr-subscribe-modal-status {
 			margin: 0 0 8px;
-			color: #666;
 		}
 
 		#ssr-subscribe-modal-status.ssr-subscribe-highlight {
@@ -57,19 +56,31 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 			line-height: 1.5;
 		}
 
+		#ssr-subscribe-modal-status.ssr-status-info {
+			color: var(--primary-color-medium, var(--primary, var(--info, #0072c3)));
+		}
+
+		#ssr-subscribe-modal-status.ssr-status-success {
+			color: var(--success-color-medium, var(--success, #249400));
+		}
+
+		#ssr-subscribe-modal-status.ssr-status-error {
+			color: var(--error-color-medium, var(--danger, #ff0000));
+		}
+
 		#ssr-subscribe-log {
 			margin: 0;
 			padding: 14px 16px;
 			min-height: 420px;
 			max-height: min(520px, calc(100vh - 220px));
 			overflow: auto;
-			background: #111827;
-			color: #e5e7eb;
+			background: var(--background-color-low, var(--bg-gray, var(--bg-light, var(--background-color, #111827))));
+			border: 1px solid var(--border-color-low, var(--border-color, var(--gray, rgba(0, 0, 0, 0.08))));
 			border-radius: 8px;
 			box-sizing: border-box;
 			white-space: pre-wrap;
 			word-break: break-word;
-			font: 13px/1.5 Menlo, Monaco, Consolas, monospace;
+			font: 13px/1.5 var(--font-mono, Menlo, Monaco, Consolas, monospace);
 		}
 
 		@media (max-width: 700px) {
@@ -101,13 +112,13 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 				return document.getElementById(id);
 			}
 
-			function setStatus(text, color) {
+			function setStatus(text, level) {
 				var status = getEl('ssr-subscribe-modal-status');
 				if (!status) {
 					return;
 				}
-				status.className = 'ssr-subscribe-highlight';
-				status.style.color = color || '#666';
+				status.className = 'ssr-subscribe-highlight' +
+					(level ? ' ssr-status-' + level : '');
 				status.textContent = text;
 			}
 
@@ -178,7 +189,7 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 				if (success) {
 					var remain = 5;
 					appendLog('订阅已结束，将在倒数5秒后返回页面');
-					setStatus('订阅已结束，将在倒数' + remain + '秒后返回页面', '#249400');
+					setStatus('订阅已结束，将在倒数' + remain + '秒后返回页面', 'success');
 					var countdown = window.setInterval(function() {
 						remain = remain - 1;
 						if (remain <= 0) {
@@ -187,11 +198,11 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 							window.location.href = '<%=servers_url%>';
 							return;
 						}
-						setStatus('订阅已结束，将在倒数' + remain + '秒后返回页面', '#249400');
+						setStatus('订阅已结束，将在倒数' + remain + '秒后返回页面', 'success');
 					}, 1000);
 					return;
 				}
-				setStatus('<%:Subscribe failed, refreshing page...%>', '#ff0000');
+				setStatus('<%:Subscribe failed, refreshing page...%>', 'error');
 				window.setTimeout(function() {
 					closeModal(true);
 					window.location.href = '<%=servers_url%>';
@@ -202,7 +213,7 @@ local autostart = self.map and self.map.ssr_subscribe_autostart
 				options = options || {};
 				running = true;
 				updateLog('');
-				setStatus(options.title || '<%:Starting subscription update...%>', '#0072c3');
+				setStatus(options.title || '<%:Starting subscription update...%>', 'info');
 				openModal();
 
 				clearPoll();

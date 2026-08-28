@@ -127,7 +127,12 @@ usage() {
 
 loger() {
 	# 1.alert 2.crit 3.err 4.warn 5.notice 6.info 7.debug
-	logger -st ssr-rules[$$] -p$1 $2
+	# $2 must stay quoted: unquoted it is word-split, and any word starting
+	# with '-' is then parsed as an option by logger. The "changed: 'a' -> 'b'"
+	# diagnostics all carry a bare "->", so busybox logger rejected them with
+	# "unrecognized option: >" and the whole message was dropped -- silently
+	# hiding exactly the lines needed to debug a rule-set change.
+	logger -st "ssr-rules[$$]" -p "$1" "$2"
 }
 
 # IP list normalization function (for comparison)

@@ -379,7 +379,13 @@ local Xray = {
 		-- loglevel = "debug",
 		-- dnsLog = true,
 		-- access = "/var/log/ssrplus-access.log",
-		-- error = "/var/log/ssrplus-error.log"
+		-- Enabled on purpose. ln_start_bin sends both stdout and stderr of
+		-- every daemon to /dev/null, and with no error path set Xray writes
+		-- its warnings to stdout -- so they were being discarded twice over.
+		-- The 2026-08-28 outage left no client-side record of any kind.
+		-- /var is tmpfs: this costs a little RAM and resets on reboot, and at
+		-- "warning" the volume is negligible. Do not raise it to debug here.
+		error = "/var/log/ssrplus-error.log",
 		loglevel = "warning"
 	},
 

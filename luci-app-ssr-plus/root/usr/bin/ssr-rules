@@ -1887,6 +1887,37 @@ if [ -n "$local_port" ]; then
 			LAST_LAN_GM_IP=""
 		fi
 
+		# Save previous server address and local port.
+		#
+		# Both are baked straight into the bypass rules -- ss_spec_wan_ac and
+		# ss_spec_tproxy each carry 'ip daddr $server return', which is what
+		# stops the client's own connection to the node from being fed back
+		# into the proxy. Neither was part of the change set, so switching
+		# nodes registered as 'nothing changed': the restore path replayed the
+		# previous node's rules and left the bypass pinned to the old address
+		# while the client dialled the new one. The client's traffic then met
+		# the redirect rules instead of the bypass and looped. tcping still
+		# succeeded, because it was completing against the local redirect port
+		# rather than the node, which made the whole thing look like a network
+		# fault rather than a rule set fault.
+		#
+		# Seen 2026-08-28: the persistence header read 20.243.129.195 while the
+		# active node was 20.189.232.107. It stayed hidden until now only
+		# because the persistence file used to get deleted often enough to
+		# force rebuilds anyway.
+		SERVER_STATE_FILE="/tmp/.last_server"
+		LOCAL_PORT_STATE_FILE="/tmp/.last_local_port"
+		if [ -f "$SERVER_STATE_FILE" ]; then
+			LAST_SERVER=$(cat "$SERVER_STATE_FILE")
+		else
+			LAST_SERVER=""
+		fi
+		if [ -f "$LOCAL_PORT_STATE_FILE" ]; then
+			LAST_LOCAL_PORT=$(cat "$LOCAL_PORT_STATE_FILE")
+		else
+			LAST_LOCAL_PORT=""
+		fi
+
 		# Check for changes in the existence and content of the server XHTTP address file
 		XHTTP_FILE_STATE_FILE="/tmp/.last_xhttp_file"
 		XHTTP_FILE_HASH_FILE="/tmp/.last_xhttp_hash"
@@ -1999,6 +2030,17 @@ if [ -n "$local_port" ]; then
 			ANY_IP_LIST_CHANGED=1
 		fi
 
+		# Endpoint comparison -- see the note above SERVER_STATE_FILE
+		ENDPOINT_CHANGED=0
+		if [ "$server" != "$LAST_SERVER" ]; then
+			loger 6 "Server changed: '$LAST_SERVER' -> '$server'"
+			ENDPOINT_CHANGED=1
+		fi
+		if [ "$local_port" != "$LAST_LOCAL_PORT" ]; then
+			loger 6 "Local port changed: '$LAST_LOCAL_PORT' -> '$local_port'"
+			ENDPOINT_CHANGED=1
+		fi
+
 		# STEP 3: Determine if forced rebuild is needed
 		FORCE_RECREATE=0
 		PERSISTENCE_EXISTS=0
@@ -2007,11 +2049,15 @@ if [ -n "$local_port" ]; then
 		# 1. TPROXY changes from empty ↔ has value
 		# 2. PROXY_PORTS changes from empty ↔ has value
 		# 3. Any IP list has changed
+		# 4. The server address or local port has changed. Restoring rules
+		#    built for a different endpoint leaves the bypass pointing at the
+		#    wrong node, so this has to rebuild rather than restore.
 		if [ "$TPROXY_HAS_VALUE" != "$LAST_HAS_VALUE" ] || \
 		   [ "$PROXY_HAS_VALUE" != "$LAST_PROXY_HAS_VALUE" ] || \
+		   [ "$ENDPOINT_CHANGED" = "1" ] || \
 		   [ "$ANY_IP_LIST_CHANGED" = "1" ]; then
 			FORCE_RECREATE=1
-			loger 6 "TPROXY, PROXY_PORTS or any IP list changed → force rebuild rules"
+			loger 6 "TPROXY, PROXY_PORTS, endpoint or any IP list changed → force rebuild rules"
 			rm_persistence
 		else
 			# No FORCE_RECREATE triggered → check persistence file
@@ -2040,6 +2086,8 @@ if [ -n "$local_port" ]; then
 		echo "$(normalize_ip_list "$LAN_GM_IP")" > "$LAN_GM_IP_STATE_FILE"
 		echo "$XHTTP_FILE_EXISTS" > "$XHTTP_FILE_STATE_FILE"
 		echo "$XHTTP_FILE_HASH" > "$XHTTP_FILE_HASH_FILE"
+		echo "$server" > "$SERVER_STATE_FILE"
+		echo "$local_port" > "$LOCAL_PORT_STATE_FILE"
 		}
 
 		# STEP 5: Check if run mode changed

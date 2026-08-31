@@ -1,0 +1,77 @@
+mihomo: meet Xray's default REALITY client version floor
+
+Switching luci-app-ssr-plus to the mihomo core made every connection fail
+with "REALITY authentication failed", while xray-core worked from the same
+router, at the same moment, with the same credentials. It also reproduced
+on the Windows desktop mihomo, with the panel's own generated config,
+against all six nodes -- so it is neither this package, nor the platform,
+nor luci-app-ssr-plus's config generation.
+
+REALITY carries a three-byte client version at the start of the ClientHello
+session id, and the server compares it against MinClientVer. Since
+af7eb68028732a8ee3c0e5d6ab2b8a657bb2e770 (2026-07-11) Xray no longer leaves
+that field unset when the config omits it --
+infra/conf/transport_security.go:118 substitutes a default:
+
+    } else {
+        config.MinClientVer = []byte{26, 3, 27}
+    }
+
+mihomo hardcodes 1.8.2 and has done so unchanged, including on the Alpha
+branch. REALITY's Value() packs the three bytes big-endian, so 1.8.2 is
+67586 against a floor of 1704731: mihomo is refused by every Xray server
+that does not explicitly lower minClientVer, which is nearly all of them.
+Reporting its own version would not help either -- 1.19.30 is 70430.
+
+Confirmed from the server side. With show:true on the node, every handshake
+prints the four values REALITY decides on:
+
+    ClientVer [1 8 2]     conn == conn false
+    ClientVer [26 3 27]   conn == conn true
+
+ClientShortId decoded identically, and correctly, in both groups, so the
+AEAD opened and config.ShortIds matched; ClientTime was the current second.
+tls.go:257 has exactly one gate and only the version term can separate
+these two groups. The node's config carries no minClientVer at all, which
+is precisely why the default applies.
+
+The floor is not really about versions. It was set from the discussion at
+XTLS/Xray-core#6181, where the concern is uTLS fingerprints: clients that
+present an outdated Chrome fingerprint, or a current one with
+X25519MLKEM768 stripped out, carry a strong distinguishing feature, and the
+server refuses them to keep its own address from being classified by it.
+So the number asserts "my ClientHello is at least as modern as v26.3.27's".
+
+For mihomo that claim holds only conditionally. component/tls/reality.go:58
+removes X25519MLKEM768 from the hello unless support-x25519mlkem768 is set,
+which is exactly the modification the discussion calls out. With it on,
+mihomo sends an unmodified HelloChrome_Auto and the claim is honest; with
+it off, this patch asserts something false about the very property the
+floor exists to check. Keep it on.
+
+The floor value itself is written here rather than anything higher, so that
+a future increase breaks the handshake immediately and visibly. Headroom
+would be worse than useless: the floor rises when a class of fingerprints
+becomes detectable, and quietly clearing the new floor would mean going on
+using one. The server logs "The default minimal client version is
+Xray-core vX.Y.Z" at startup, which is where to look when it breaks.
+
+26.3.27 also stays distinguishable in a shared node log -- this router runs
+both cores against the same node, and luci-app-ssr-plus packages xray-core
+26.7.28. MaxClientVer has no default, so there is no upper bound.
+
+--- a/component/tls/reality.go
++++ b/component/tls/reality.go
+@@ -71,9 +71,9 @@
+ 		binary.BigEndian.PutUint64(hello.SessionId, uint64(ntp.Now().Unix()))
+ 
+ 		copy(hello.SessionId[8:], realityConfig.ShortID[:])
+-		hello.SessionId[0] = 1
+-		hello.SessionId[1] = 8
+-		hello.SessionId[2] = 2
++		hello.SessionId[0] = 26
++		hello.SessionId[1] = 3
++		hello.SessionId[2] = 27
+ 
+ 		//log.Debugln("REALITY hello.sessionId[:16]: %v", hello.SessionId[:16])
+ 

@@ -117,6 +117,8 @@ TAGS*~
 # AI assistants / agents local state
 .agents/
 .agent/
+.arts/
+.codegraph/
 .ai/
 .assistant/
 .chat/

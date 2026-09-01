@@ -1450,6 +1450,10 @@ msgstr "KcpTun 端口"
 msgid "KcpTun Version"
 msgstr "KcpTun 版本号"
 
+#: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client-config.lua:1536
+msgid "Keep X25519MLKEM768 in ClientHello"
+msgstr "在 ClientHello 中保留 X25519MLKEM768"
+
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/control.lua:32
 msgid "LAN Access Control"
 msgstr "内网客户端分流代理控制"
@@ -1474,6 +1478,17 @@ msgstr "LAN IP 访问控制"
 #: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:271
 msgid "Latest Version"
 msgstr "最新版本"
+
+#: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client-config.lua:1538
+msgid ""
+"Leave enabled. When off, mihomo strips X25519MLKEM768 out of an otherwise "
+"current Chrome fingerprint, which is itself a strong distinguishing feature; "
+"Xray servers refuse such clients by default for that reason. Turn it off "
+"only for a REALITY server too old to understand it, see:"
+msgstr ""
+"保持启用。关闭后，mihomo 会从原本是最新版 Chrome 的指纹中剔除 "
+"X25519MLKEM768，这本身就是一种强特征；Xray 服务端默认会因此拒绝这类客户端。"
+"仅当 REALITY 服务端过旧、无法识别它时才关闭，参见："
 
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua:139
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua:176

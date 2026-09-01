@@ -1440,6 +1440,10 @@ msgstr ""
 msgid "KcpTun Version"
 msgstr ""
 
+#: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client-config.lua:1536
+msgid "Keep X25519MLKEM768 in ClientHello"
+msgstr ""
+
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/control.lua:32
 msgid "LAN Access Control"
 msgstr ""
@@ -1463,6 +1467,14 @@ msgstr ""
 #: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:122
 #: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:271
 msgid "Latest Version"
+msgstr ""
+
+#: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client-config.lua:1538
+msgid ""
+"Leave enabled. When off, mihomo strips X25519MLKEM768 out of an otherwise "
+"current Chrome fingerprint, which is itself a strong distinguishing feature; "
+"Xray servers refuse such clients by default for that reason. Turn it off "
+"only for a REALITY server too old to understand it, see:"
 msgstr ""
 
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua:139

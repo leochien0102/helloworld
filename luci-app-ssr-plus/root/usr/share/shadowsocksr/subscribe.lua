@@ -658,7 +658,14 @@ local function apply_mihomo_tls_options(proxy, node)
 		proxy["reality-opts"] = {
 			["public-key"] = string_from_value(node.reality_publickey),
 			["short-id"] = string_from_value(node.reality_shortid),
-			["support-x25519mlkem768"] = bool_from_flag(node.enable_x25519mlkem768 or "1")
+			-- Always on, and written as a constant because there is nothing here to
+			-- read it from: these nodes are parsed out of subscription links into
+			-- throwaway tables and never become UCI sections, and no vless:// URI
+			-- parameter carries this setting (reality gets pbk, sid, spx and pqv).
+			-- Keeping X25519MLKEM768 is the safe side anyway -- cutting it out of an
+			-- otherwise current Chrome fingerprint is itself a strong feature. Give
+			-- it a global UCI switch if that ever needs to be configurable.
+			["support-x25519mlkem768"] = true
 		}
 	end
 

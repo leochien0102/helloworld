@@ -686,7 +686,7 @@ local function apply_v2ray_tls_options(proxy, sid)
 		proxy["reality-opts"] = {
 			["public-key"] = string_or_nil(get_server_field(sid, "reality_publickey", "")),
 			["short-id"] = string_or_nil(get_server_field(sid, "reality_shortid", "")),
-			["support-x25519mlkem768"] = bool_enabled(get_server_field(sid, "enable_mldsa65verify", "0"))
+			["support-x25519mlkem768"] = bool_enabled(get_server_field(sid, "enable_x25519mlkem768", "1"))
 		}
 	end
 

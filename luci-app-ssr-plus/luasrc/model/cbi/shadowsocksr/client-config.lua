@@ -1533,6 +1533,15 @@ if is_finded("xray") then
 	o:value("full")
 	o:depends("enable_ech", true)
 
+	o = s:option(Flag, "enable_x25519mlkem768", translate("Keep X25519MLKEM768 in ClientHello"))
+	o.description = translate(
+	    "<font><b>" .. translate("Leave enabled. When off, mihomo strips X25519MLKEM768 out of an otherwise current Chrome fingerprint, which is itself a strong distinguishing feature; Xray servers refuse such clients by default for that reason. Turn it off only for a REALITY server too old to understand it, see:") .. "</b></font>" ..
+	    " <a href='https://github.com/XTLS/Xray-core/pull/6181' target='_blank'>" ..
+	    "<font style='color:green'><b>" .. translate("Click to the page") .. "</b></font></a>")
+	o.rmempty = false
+	o.default = "1"
+	o:depends({type = "v2ray", reality = true})
+
 	o = s:option(Flag, "enable_mldsa65verify", translate("Enable ML-DSA-65(optional)"))
 	o.rmempty = true
 	o.default = "0"

@@ -658,7 +658,7 @@ local function apply_mihomo_tls_options(proxy, node)
 		proxy["reality-opts"] = {
 			["public-key"] = string_from_value(node.reality_publickey),
 			["short-id"] = string_from_value(node.reality_shortid),
-			["support-x25519mlkem768"] = bool_from_flag(node.enable_mldsa65verify)
+			["support-x25519mlkem768"] = bool_from_flag(node.enable_x25519mlkem768 or "1")
 		}
 	end
 

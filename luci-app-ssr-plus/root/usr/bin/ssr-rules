@@ -512,7 +512,10 @@ ipset_iptables() {
 	[ -n "$server" ] && $IPT -I SS_SPEC_WAN_AC -p tcp ! --dport 53 -d "$server" -j RETURN
 
 	# Probe bypass set -- see the nftables side for why it is unconditional.
-	ipset -N ss_spec_probe hash:net 2>/dev/null
+	# Flushed on every run so a probe killed mid-flight leaves nothing behind,
+	# which is what the nftables path already does.
+	ipset -exist -N ss_spec_probe hash:net
+	ipset -F ss_spec_probe 2>/dev/null
 	$IPT -I SS_SPEC_WAN_AC -m set --match-set ss_spec_probe dst -j RETURN
 
 	ipset -N gmlan hash:net 2>/dev/null

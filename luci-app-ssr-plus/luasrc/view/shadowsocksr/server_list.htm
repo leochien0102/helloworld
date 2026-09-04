@@ -128,7 +128,11 @@ end
 			const realities = document.getElementsByClassName("reality");
 			const startText = '<%:Start Detection%>';
 			const stopText = '<%:Stop Detection%>';
-			const maxConcurrent = 10;
+			// uhttpd 默认 max_requests 为 3，发得再多也只是让多余的请求
+			// 排队等到 network_timeout 被掐断。
+			const maxConcurrent = 3;
+			// 兜底上限：act_ping 最坏情况下要把整条回退链跑满。
+			const probeTimeoutMs = 25000;
 			let activeRunId = 0;
 			let probing = false;
 			let queueIndex = 0;
@@ -198,63 +202,100 @@ end
 				}
 			};
 
+			const hintOf = (el) => (el && typeof el.getAttribute === "function") ? (el.getAttribute("hint") || "") : "";
+
 			const xhr = (index, runId) => {
 				return new Promise((res) => {
-					const dom = doms[index];
-						const port = ports[index];
-						const transport = transports[index];
-						const wsPath = wsPaths[index];
-						const wsHost = wsHosts[index];
-						const tlsHost = tlsHosts[index];
-						const tls = tlss[index];
-						const type = types[index];
-						const proto = protos[index];
-						const reality = realities[index];
-						if (!dom || !port || runId !== activeRunId) {
-							res();
-							return;
+					// LuCI 25.12 的 XHR.get 在请求被拒绝时不会调用回调（luci.js 的
+					// poll() 没有 .catch()），所以这个 promise 必须自己保证一定 settle，
+					// 否则整条探测队列和按钮状态都会永久卡住。
+					let settled = false;
+					let timer = null;
+					const settle = () => {
+						if (settled) return;
+						settled = true;
+						if (timer !== null) {
+							clearTimeout(timer);
+							timer = null;
 						}
-					if (type && type.getAttribute("hint") === "clash") {
-						dom.innerHTML = '<font style="color:#999999">N/A</font>';
-						port.innerHTML = '<font style="color:#999999">N/A</font>';
 						res();
+					};
+
+					const dom = doms[index];
+					const port = ports[index];
+					if (!dom || !port || runId !== activeRunId) {
+						settle();
 						return;
 					}
-					port.innerHTML = '<font style=\"color:#0072c3\">connect</font>';
-							window.ssrXHR.get('<%=luci.dispatcher.build_url("admin", "services", "shadowsocksr", "ping")%>', {
+
+					const failWith = (label) => {
+						if (settled || runId !== activeRunId) return;
+						dom.innerHTML = '<font style="color:#ff0000">-- ms</font>';
+						port.innerHTML = `<font style="color:#ff0000">${label}</font>`;
+					};
+
+					if (hintOf(types[index]) === "clash") {
+						dom.innerHTML = '<font style="color:#999999">N/A</font>';
+						port.innerHTML = '<font style="color:#999999">N/A</font>';
+						settle();
+						return;
+					}
+
+					port.innerHTML = '<font style="color:#0072c3">connect</font>';
+
+					timer = setTimeout(() => {
+						failWith('timeout');
+						settle();
+					}, probeTimeoutMs);
+
+					let pending;
+					try {
+						pending = window.ssrXHR.get('<%=luci.dispatcher.build_url("admin", "services", "shadowsocksr", "ping")%>', {
 							index,
 							sid: dom.getAttribute("data-sid"),
-							domain: dom.getAttribute("hint"),
-							port: port.getAttribute("hint"),
-							transport: transport.getAttribute("hint"),
-							wsPath: wsPath.getAttribute("hint"),
-							host: wsHost ? wsHost.getAttribute("hint") : "",
-							tlsHost: tlsHost ? tlsHost.getAttribute("hint") : "",
-							tls: tls.getAttribute("hint"),
-							type: type.getAttribute("hint"),
-							proto: proto.getAttribute("hint"),
-							reality: reality ? reality.getAttribute("hint") : ""
+							domain: hintOf(dom),
+							port: hintOf(port),
+							transport: hintOf(transports[index]),
+							wsPath: hintOf(wsPaths[index]),
+							host: hintOf(wsHosts[index]),
+							tlsHost: hintOf(tlsHosts[index]),
+							tls: hintOf(tlss[index]),
+							type: hintOf(types[index]),
+							proto: hintOf(protos[index]),
+							reality: hintOf(realities[index])
 						},
-					(x, result) => {
-						if (runId !== activeRunId) {
-							res();
-							return;
-						}
-						result = result || {};
-						let col = '#ff0000';
-						if (result.ping) {
-							if (result.ping < 300) col = '#ff3300';
-							if (result.ping < 200) col = '#ff7700';
-							if (result.ping < 100) col = '#249400';
-						}
-						dom.innerHTML = `<font style=\"color:${col}\">${(result.ping ? result.ping : "--") + " ms"}</font>`;
-						if (result.socket) {
-							port.innerHTML = '<font style=\"color:#249400\">ok</font>';
-						} else {
-							port.innerHTML = '<font style=\"color:#ff0000\">fail</font>';
-						}
-						res();
-					});
+						(x, result) => {
+							if (settled || runId !== activeRunId) {
+								settle();
+								return;
+							}
+							result = result || {};
+							let col = '#ff0000';
+							if (result.ping) {
+								if (result.ping < 300) col = '#ff3300';
+								if (result.ping < 200) col = '#ff7700';
+								if (result.ping < 100) col = '#249400';
+							}
+							dom.innerHTML = `<font style="color:${col}">${(result.ping ? result.ping : "--") + " ms"}</font>`;
+							if (result.socket) {
+								port.innerHTML = '<font style="color:#249400">ok</font>';
+							} else {
+								port.innerHTML = '<font style="color:#ff0000">fail</font>';
+							}
+							settle();
+						});
+					} catch (e) {
+						failWith('fail');
+						settle();
+						return;
+					}
+
+					if (pending && typeof pending.catch === "function") {
+						pending.catch(() => {
+							failWith('fail');
+							settle();
+						});
+					}
 				});
 			};
 
@@ -263,7 +304,8 @@ end
 					return Promise.resolve();
 				}
 				const index = queueIndex++;
-				return xhr(index, runId).then(() => launchNext(runId));
+				const next = () => launchNext(runId);
+				return xhr(index, runId).then(next, next);
 			};
 
 			const startProbe = () => {
@@ -278,11 +320,12 @@ end
 					workers.push(launchNext(runId));
 				}
 
-				Promise.all(workers).then(() => {
+				const done = () => {
 					if (runId === activeRunId) {
 						setProbeState(false);
 					}
-				});
+				};
+				Promise.all(workers).then(done, done);
 			};
 
 			const stopProbe = () => {

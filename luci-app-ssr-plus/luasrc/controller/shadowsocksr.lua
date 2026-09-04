@@ -494,6 +494,85 @@ local function use_fw4_backend()
 	return luci.sys.call("command -v fw4 >/dev/null") == 0
 end
 
+-- 探测期间临时放行的 nft 集合。fw3 只有一个 ipset 同时服务 nat 与 tproxy，
+-- fw4 把它拆成了两张表，TCP 走 inet ss_spec、UDP/tproxy 走 ip ss_spec_mangle，
+-- 两张都要放行，否则 hysteria2/tuic 的探测流量仍会被自己的代理吃掉。
+local NFT_BYPASS_SETS = {
+	{ family = "inet", tbl = "ss_spec", set = "ss_spec_wan_ac" },
+	{ family = "ip", tbl = "ss_spec_mangle", set = "ss_spec_wan_ac" }
+}
+
+-- nft 的 ipv4_addr 集合不接受裸主机名，必须先解析成地址再喂进去。
+local function resolve_ipv4(host)
+	if not host or host == "" then
+		return nil
+	end
+	if host:match("^%d+%.%d+%.%d+%.%d+$") then
+		return host
+	end
+	local ok, res = pcall(nixio.getaddrinfo, host, "inet")
+	if ok and type(res) == "table" then
+		for _, entry in ipairs(res) do
+			if entry.address and entry.address:match("^%d+%.%d+%.%d+%.%d+$") then
+				return entry.address
+			end
+		end
+	end
+	return nil
+end
+
+-- 返回一个句柄供 del_probe_bypass 对称清理，加不上就返回 nil。
+local function add_probe_bypass(domain, use_nft)
+	if not domain or domain == "" then
+		return nil
+	end
+
+	if not use_nft then
+		local cmd = "ipset add ss_spec_wan_ac " .. luci.util.shellquote(domain) .. " 2>/dev/null"
+		if luci.sys.call(cmd) == 0 then
+			return { mode = "ipset", target = domain }
+		end
+		return nil
+	end
+
+	local ip = resolve_ipv4(domain)
+	if not ip then
+		return nil
+	end
+
+	local added = {}
+	for _, s in ipairs(NFT_BYPASS_SETS) do
+		local cmd = string.format(
+			"nft add element %s %s %s { %s } 2>/dev/null",
+			s.family, s.tbl, s.set, ip
+		)
+		if luci.sys.call(cmd) == 0 then
+			added[#added + 1] = s
+		end
+	end
+
+	if #added == 0 then
+		return nil
+	end
+	return { mode = "nft", target = ip, sets = added }
+end
+
+local function del_probe_bypass(handle)
+	if not handle then
+		return
+	end
+	if handle.mode == "ipset" then
+		luci.sys.call("ipset -exist del ss_spec_wan_ac " .. luci.util.shellquote(handle.target) .. " 2>/dev/null")
+		return
+	end
+	for _, s in ipairs(handle.sets or {}) do
+		luci.sys.call(string.format(
+			"nft delete element %s %s %s { %s } 2>/dev/null",
+			s.family, s.tbl, s.set, handle.target
+		))
+	end
+end
+
 local function parse_clash_groups(raw)
 	local info = json.parse(raw or "")
 	local proxies = info and info.proxies or nil
@@ -1454,14 +1533,7 @@ function act_ping()
 
 	-- 临时放行防火墙逻辑
 	local use_nft = use_fw4_backend()
-	local iret = false
-	if domain then
-		if use_nft then
-			iret = luci.sys.call("nft add element inet ss_spec ss_spec_wan_ac { " .. domain .. " } 2>/dev/null") == 0
-		else
-			iret = luci.sys.call("ipset add ss_spec_wan_ac " .. domain .. " 2>/dev/null") == 0
-		end
-	end
+	local bypass = add_probe_bypass(domain, use_nft)
 	-- Hysteria2、TUIC 节点轻量 UDP 端口检测
 	if proto:find("hysteria2") or type:find("hysteria2") or proto:find("tuic") or type:find("tuic") then
 		local udp_cmd = string.format("nping --udp -c 1 -p %d %s 2>/dev/null", port, domain)
@@ -1588,13 +1660,7 @@ function act_ping()
 	end
 
 	-- 4. 清理防火墙规则
-	if iret then
-		if use_nft then
-			luci.sys.call("nft delete element inet ss_spec ss_spec_wan_ac { " .. domain .. " } 2>/dev/null")
-		else
-			luci.sys.call("ipset del ss_spec_wan_ac " .. domain .. " 2>/dev/null")
-		end
-	end
+	del_probe_bypass(bypass)
 
 	if sid and sid ~= "" then
 		save_detect_cache_entry(sid, {
@@ -1647,13 +1713,9 @@ function check_port()
 
 		-- 临时加入 set
 		local is_ipv6 = is_ipv6_address(s.server)
-		local iret = false
+		local bypass = nil
 		if not is_ipv6 then
-			if use_nft then
-				iret = luci.sys.call("nft add element inet ss_spec ss_spec_wan_ac { " .. s.server .. " } 2>/dev/null") == 0
-			else
-				iret = luci.sys.call("ipset add ss_spec_wan_ac " .. s.server .. " 2>/dev/null") == 0
-			end
+			bypass = add_probe_bypass(s.server, use_nft)
 		end
 
 		-- TCP 测试
@@ -1670,13 +1732,7 @@ function check_port()
 		end
 
 		-- 删除临时 set
-		if iret then
-			if use_nft then
-				luci.sys.call("nft delete element inet ss_spec ss_spec_wan_ac { " .. s.server .. " } 2>/dev/null")
-			else
-				luci.sys.call("ipset del ss_spec_wan_ac " .. s.server)
-			end
-		end
+		del_probe_bypass(bypass)
 	end)
 
 	luci.http.prepare_content("application/json")

@@ -1199,11 +1199,30 @@ normalize_xray_protocol_nodes() {
 	fi
 }
 
+# 把抗污染上游 DNS 强制走代理。缺了这步，gfw 模式会死锁：dns2tcp 以 TCP
+# 访问上游，而 gfw 模式只代理 @gfwlist 里的目标，@gfwlist 又要靠 dnsmasq 从
+# 永远收不到的应答里填——DNS 与分流互为前提，两边都起不来。
 add_dns_into_ipset() {
-	case "$1" in
-	gfw) ipset add gfwlist "${2%:*}" 2>/dev/null ;;
-	*) ipset add ss_spec_wan_ac "${2%:*}" nomatch 2>/dev/null ;;
+	local mode="$1"
+	local ip="${2%:*}"
+
+	[ -n "$ip" ] || return 0
+
+	if [ "$USE_TABLES" = "nftables" ]; then
+		# 只有 gfw 模式需要这一条。其余模式的 ss_spec_wan_ac 链以 jump
+		# ss_spec_wan_fw 收尾，@china 之外的目标本来就会被代理；而上游 DNS
+		# 也不在旁路集合里，正是 iptables 分支用 nomatch 表达的语义。
+		[ "$mode" = "gfw" ] || return 0
+		nft add element inet ss_spec gfwlist "{ $ip }" ||
+			echolog "警告：上游 DNS $ip 未能加入 gfwlist，gfw 模式下 DNS 无法走代理。"
+		return 0
+	fi
+
+	case "$mode" in
+	gfw) ipset add gfwlist "$ip" 2>/dev/null ;;
+	*) ipset add ss_spec_wan_ac "$ip" nomatch 2>/dev/null ;;
 	esac
+	return 0
 }
 
 start_dns() {
@@ -1257,10 +1276,8 @@ start_dns() {
 	if [ "$builtin_dns_enabled" = "1" ]; then
 		pdnsd_enable_flag=7
 	elif [ "$ssrplus_dns" != "0" ]; then
-		if [ "$USE_TABLES" = "iptables" ]; then
-			if [ -n "$dnsserver" ]; then
-				add_dns_into_ipset "$run_mode" "$dnsserver"
-			fi
+		if [ -n "$dnsserver" ]; then
+			add_dns_into_ipset "$run_mode" "$dnsserver"
 		fi
 		case "$ssrplus_dns" in
 		1)
@@ -1273,9 +1290,7 @@ start_dns() {
 			output=$(for i in $(echo "$mosdns_dnsserver" | sed "s/,/ /g"); do
 				dnsserver="${i%:*}"
 				dnsserver="${i##*/}"
-				if [ "$USE_TABLES" = "iptables" ]; then
-					add_dns_into_ipset "$run_mode" "$dnsserver"
-				fi
+				add_dns_into_ipset "$run_mode" "$dnsserver"
 				echo "            - addr: $i"
 				echo "              enable_pipeline: true"
 			done)

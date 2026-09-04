@@ -494,15 +494,14 @@ local function use_fw4_backend()
 	return luci.sys.call("command -v fw4 >/dev/null") == 0
 end
 
--- 探测期间临时放行的 nft 集合。fw3 只有一个 ipset 同时服务 nat 与 tproxy，
--- fw4 把它拆成了两张表，TCP 走 inet ss_spec、UDP/tproxy 走 ip ss_spec_mangle，
--- 两张都要放行，否则 hysteria2/tuic 的探测流量仍会被自己的代理吃掉。
-local NFT_BYPASS_SETS = {
-	{ family = "inet", tbl = "ss_spec", set = "ss_spec_wan_ac" },
-	{ family = "ip", tbl = "ss_spec_mangle", set = "ss_spec_wan_ac" }
-}
+-- 探测期间临时放行用的专用集合。ssr-rules 在所有运行模式下都会建它，
+-- 而 ss_spec_wan_ac 只在 router 模式下存在，复用它会让 gfw/all 模式
+-- 悄悄失去旁路。探测流量由路由器自己发出，只经过 inet ss_spec 的 output
+-- 钩子；ip ss_spec_mangle 只挂了 prerouting，碰不到本机包，所以不涉及。
+local PROBE_BYPASS_SET = "ss_spec_probe"
 
--- nft 的 ipv4_addr 集合不接受裸主机名，必须先解析成地址再喂进去。
+-- nft 的 ipv4_addr 集合不接受裸主机名，必须先解析成地址再喂进去；
+-- ipset 的 hash:net 虽然能自己解析，两边都走这里是为了行为一致。
 local function resolve_ipv4(host)
 	if not host or host == "" then
 		return nil
@@ -527,34 +526,27 @@ local function add_probe_bypass(domain, use_nft)
 		return nil
 	end
 
-	if not use_nft then
-		local cmd = "ipset add ss_spec_wan_ac " .. luci.util.shellquote(domain) .. " 2>/dev/null"
-		if luci.sys.call(cmd) == 0 then
-			return { mode = "ipset", target = domain }
-		end
-		return nil
-	end
-
 	local ip = resolve_ipv4(domain)
 	if not ip then
 		return nil
 	end
 
-	local added = {}
-	for _, s in ipairs(NFT_BYPASS_SETS) do
-		local cmd = string.format(
-			"nft add element %s %s %s { %s } 2>/dev/null",
-			s.family, s.tbl, s.set, ip
-		)
+	if not use_nft then
+		local cmd = string.format("ipset add %s %s 2>/dev/null", PROBE_BYPASS_SET, ip)
 		if luci.sys.call(cmd) == 0 then
-			added[#added + 1] = s
+			return { mode = "ipset", target = ip }
 		end
-	end
-
-	if #added == 0 then
 		return nil
 	end
-	return { mode = "nft", target = ip, sets = added }
+
+	local cmd = string.format(
+		"nft add element inet ss_spec %s { %s } 2>/dev/null",
+		PROBE_BYPASS_SET, ip
+	)
+	if luci.sys.call(cmd) ~= 0 then
+		return nil
+	end
+	return { mode = "nft", target = ip }
 end
 
 local function del_probe_bypass(handle)
@@ -562,15 +554,16 @@ local function del_probe_bypass(handle)
 		return
 	end
 	if handle.mode == "ipset" then
-		luci.sys.call("ipset -exist del ss_spec_wan_ac " .. luci.util.shellquote(handle.target) .. " 2>/dev/null")
+		luci.sys.call(string.format(
+			"ipset -exist del %s %s 2>/dev/null",
+			PROBE_BYPASS_SET, handle.target
+		))
 		return
 	end
-	for _, s in ipairs(handle.sets or {}) do
-		luci.sys.call(string.format(
-			"nft delete element %s %s %s { %s } 2>/dev/null",
-			s.family, s.tbl, s.set, handle.target
-		))
-	end
+	luci.sys.call(string.format(
+		"nft delete element inet ss_spec %s { %s } 2>/dev/null",
+		PROBE_BYPASS_SET, handle.target
+	))
 end
 
 local function parse_clash_groups(raw)

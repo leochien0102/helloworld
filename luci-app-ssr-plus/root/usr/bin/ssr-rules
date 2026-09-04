@@ -322,7 +322,7 @@ flush_nftables() {
 	fi
 
 	# Optional: force delete all ss_spec related sets (even if table was accidentally deleted)
-	for setname in ss_spec_lan_ac ss_spec_wan_ac ssr_gen_router \
+	for setname in ss_spec_lan_ac ss_spec_wan_ac ss_spec_probe ssr_gen_router \
 			china fplan bplan gmlan whitelist blacklist gfwlist music; do
 		$NFT delete set inet ss_spec $setname 2>/dev/null
 		$NFT delete set ip ss_spec_mangle $setname 2>/dev/null
@@ -358,7 +358,7 @@ flush_iptables_legacy() {
 	if ip route show table 999 | grep -Eq "^local.*dev lo"; then
 		ip route del local 0.0.0.0/0 dev lo table 999 2>/dev/null
 	fi
-	for setname in ss_spec_lan_ac ss_spec_wan_ac ssr_gen_router \
+	for setname in ss_spec_lan_ac ss_spec_wan_ac ss_spec_probe ssr_gen_router \
 			china fplan bplan gmlan whitelist blacklist gfwlist music; do
 		ipset -X $setname 2>/dev/null
 	done
@@ -425,6 +425,17 @@ ipset_nft() {
 		$NFT flush chain inet ss_spec $chain
 	done
 
+	# Probe bypass set. Created in every run mode -- unlike ss_spec_wan_ac,
+	# which only exists under router -- so LuCI can exempt a node while it
+	# measures it no matter how the tunnel is configured. Empty in steady
+	# state, so it matches nothing and costs one lookup.
+	if ! $NFT list set inet ss_spec ss_spec_probe >/dev/null 2>&1; then
+		$NFT add set inet ss_spec ss_spec_probe '{ type ipv4_addr; flags interval; auto-merge; }' 2>/dev/null
+	else
+		$NFT flush set inet ss_spec ss_spec_probe 2>/dev/null
+	fi
+	$NFT add rule inet ss_spec ss_spec_wan_ac ip daddr @ss_spec_probe return
+
 	# Add basic rules
 	# BASIC RULES (exceptions first) — TCP
 	$NFT add rule inet ss_spec ss_spec_wan_ac meta l4proto tcp tcp dport 53 ip daddr 127.0.0.0/8 return
@@ -488,6 +499,10 @@ ipset_iptables() {
 
 	$IPT -I SS_SPEC_WAN_AC -p tcp --dport 53 -d 127.0.0.0/8 -j RETURN
 	[ -n "$server" ] && $IPT -I SS_SPEC_WAN_AC -p tcp ! --dport 53 -d "$server" -j RETURN
+
+	# Probe bypass set -- see the nftables side for why it is unconditional.
+	ipset -N ss_spec_probe hash:net 2>/dev/null
+	$IPT -I SS_SPEC_WAN_AC -m set --match-set ss_spec_probe dst -j RETURN
 
 	ipset -N gmlan hash:net 2>/dev/null
 	for ip in $LAN_GM_IP; do ipset -! add gmlan "$ip"; done

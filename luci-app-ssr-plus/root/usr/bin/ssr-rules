@@ -52,6 +52,11 @@ CLEANUP_PERSISTENCE=0
 # is on disk (UDP relay switched off, for instance). Every other path is
 # opportunistic and goes through validate_persistence_candidate() instead.
 PERSIST_AUTHORITATIVE=0
+# Hashed to decide whether the persisted ruleset predates the current
+# generator -- see RULES_FP_STATE_FILE. $0 is what actually ran; fall back to
+# the packaged path when it is not readable (called through a shell, say).
+SELF_PATH="$0"
+[ -r "$SELF_PATH" ] || SELF_PATH="/usr/bin/ssr-rules"
 # ASCII code for SSRP.Use whatever,just not the same.
 FWMARK="0x53535250"
 
@@ -430,11 +435,17 @@ ipset_nft() {
 	# measures it no matter how the tunnel is configured. Empty in steady
 	# state, so it matches nothing and costs one lookup.
 	if ! $NFT list set inet ss_spec ss_spec_probe >/dev/null 2>&1; then
-		$NFT add set inet ss_spec ss_spec_probe '{ type ipv4_addr; flags interval; auto-merge; }' 2>/dev/null
+		# Deliberately unsilenced: if the set cannot be created the rule below
+		# fails too, and the only symptom is one missing line in a chain
+		# nobody reads. Let the error reach the log.
+		$NFT add set inet ss_spec ss_spec_probe '{ type ipv4_addr; flags interval; auto-merge; }' ||
+			loger 3 "Failed to create the ss_spec_probe bypass set; node detection will measure through the tunnel"
 	else
 		$NFT flush set inet ss_spec ss_spec_probe 2>/dev/null
 	fi
-	$NFT add rule inet ss_spec ss_spec_wan_ac ip daddr @ss_spec_probe return
+	if $NFT list set inet ss_spec ss_spec_probe >/dev/null 2>&1; then
+		$NFT add rule inet ss_spec ss_spec_wan_ac ip daddr @ss_spec_probe return
+	fi
 
 	# Add basic rules
 	# BASIC RULES (exceptions first) — TCP
@@ -2045,6 +2056,26 @@ if [ -n "$local_port" ]; then
 			ANY_IP_LIST_CHANGED=1
 		fi
 
+		# Generator fingerprint. Every trigger below watches configuration;
+		# none of them notices that this script itself changed, so a package
+		# upgrade that alters the generated ruleset stayed masked behind the
+		# restore fast path -- the rules kept coming back from a file written
+		# by the previous version. Seen 2026-09-04: ss_spec_probe was missing
+		# from a freshly upgraded router until the persistence file was
+		# deleted by hand. Hash the script so any edit forces a rebuild.
+		RULES_FP_STATE_FILE="/tmp/.last_rules_fp"
+		RULES_FP=$(md5sum "$SELF_PATH" 2>/dev/null | awk '{print $1}')
+		if [ -f "$RULES_FP_STATE_FILE" ]; then
+			LAST_RULES_FP=$(cat "$RULES_FP_STATE_FILE")
+		else
+			LAST_RULES_FP=""
+		fi
+		RULES_CHANGED=0
+		if [ -n "$RULES_FP" ] && [ "$RULES_FP" != "$LAST_RULES_FP" ]; then
+			loger 6 "Rule generator changed: '$LAST_RULES_FP' -> '$RULES_FP'"
+			RULES_CHANGED=1
+		fi
+
 		# Endpoint comparison -- see the note above SERVER_STATE_FILE
 		ENDPOINT_CHANGED=0
 		if [ "$server" != "$LAST_SERVER" ]; then
@@ -2067,12 +2098,15 @@ if [ -n "$local_port" ]; then
 		# 4. The server address or local port has changed. Restoring rules
 		#    built for a different endpoint leaves the bypass pointing at the
 		#    wrong node, so this has to rebuild rather than restore.
+		# 5. This script changed, so the ruleset it would generate no longer
+		#    matches the persisted one.
 		if [ "$TPROXY_HAS_VALUE" != "$LAST_HAS_VALUE" ] || \
 		   [ "$PROXY_HAS_VALUE" != "$LAST_PROXY_HAS_VALUE" ] || \
 		   [ "$ENDPOINT_CHANGED" = "1" ] || \
+		   [ "$RULES_CHANGED" = "1" ] || \
 		   [ "$ANY_IP_LIST_CHANGED" = "1" ]; then
 			FORCE_RECREATE=1
-			loger 6 "TPROXY, PROXY_PORTS, endpoint or any IP list changed → force rebuild rules"
+			loger 6 "TPROXY, PROXY_PORTS, endpoint, generator or any IP list changed → force rebuild rules"
 			rm_persistence
 		else
 			# No FORCE_RECREATE triggered → check persistence file
@@ -2103,6 +2137,7 @@ if [ -n "$local_port" ]; then
 		echo "$XHTTP_FILE_HASH" > "$XHTTP_FILE_HASH_FILE"
 		echo "$server" > "$SERVER_STATE_FILE"
 		echo "$local_port" > "$LOCAL_PORT_STATE_FILE"
+		echo "$RULES_FP" > "$RULES_FP_STATE_FILE"
 		}
 
 		# STEP 5: Check if run mode changed

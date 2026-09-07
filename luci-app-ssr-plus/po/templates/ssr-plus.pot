@@ -2674,7 +2674,8 @@ msgstr ""
 msgid ""
 "The online upgrade downloads the latest luci-app-ssr-plus package from fw876/"
 "helloworld releases and installs the matching IPK or APK package for this "
-"system."
+"system. Upgrading will overwrite the custom fixes in the current version. "
+"Proceed with caution."
 msgstr ""
 
 #: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:10

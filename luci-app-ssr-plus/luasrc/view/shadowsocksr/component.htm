@@ -3,7 +3,8 @@
 	var componentMeta = {
 		mainprogram: {
 			label: '<%:SSR Plus+ Main Program%>',
-			help: '<%:The online upgrade downloads the latest luci-app-ssr-plus package from fw876/helloworld releases and installs the matching IPK or APK package for this system. Upgrading will overwrite the custom fixes in the current version. Proceed with caution.%>'
+			help: '<%:The online upgrade downloads the latest luci-app-ssr-plus package from fw876/helloworld releases and installs the matching IPK or APK package for this system.%>',
+			warning: '<%:Upgrading will overwrite the custom fixes in the current version. Proceed with caution.%>'
 		},
 		xray: {
 			label: '<%:Xray-core%>',
@@ -74,6 +75,10 @@
 		return componentMeta[component] ? componentMeta[component].help : '';
 	}
 
+	function componentWarning(component) {
+		return componentMeta[component] ? componentMeta[component].warning || '' : '';
+	}
+
 	function displayMessage(message) {
 		return componentMessageMap[message] || message || '';
 	}
@@ -116,6 +121,9 @@
 
 		if (help) {
 			help.innerHTML = componentHelp(component);
+			if (componentWarning(component)) {
+				help.innerHTML += ' <span class="component-upgrade-warning">' + componentWarning(component) + '</span>';
+			}
 		}
 
 		html.push('<div><strong><%:Installed Version%>:</strong> ' + (data.current_version || '<%:Not installed%>') + '</div>');
@@ -376,6 +384,11 @@
 	.component-upgrade-help {
 		margin-top: 6px;
 		color: #666;
+	}
+
+	.component-upgrade-warning {
+		color: #c0392b;
+		font-weight: 700;
 	}
 
 	.component-upgrade-result {

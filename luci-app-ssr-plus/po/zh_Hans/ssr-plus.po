@@ -2697,11 +2697,14 @@ msgstr "心跳包发送间隔（单位：秒）"
 msgid ""
 "The online upgrade downloads the latest luci-app-ssr-plus package from fw876/"
 "helloworld releases and installs the matching IPK or APK package for this "
-"system. Upgrading will overwrite the custom fixes in the current version. "
-"Proceed with caution."
+"system."
 msgstr ""
 "在线更新会从 fw876/helloworld 发布页下载最新 luci-app-ssr-plus，并根据当前系"
-"统安装匹配的 IPK 或 APK 包。升级将覆盖当前版本中的定制修复，请谨慎操作。"
+"统安装匹配的 IPK 或 APK 包。"
+
+#: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:7
+msgid "Upgrading will overwrite the custom fixes in the current version. Proceed with caution."
+msgstr "升级将覆盖当前版本中的定制修复，请谨慎操作。"
 
 #: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:10
 msgid ""

@@ -146,7 +146,7 @@ loger() {
 	# diagnostics all carry a bare "->", so busybox logger rejected them with
 	# "unrecognized option: >" and the whole message was dropped -- silently
 	# hiding exactly the lines needed to debug a rule-set change.
-	logger -st "ssr-rules[$$]" -p "$1" "$2"
+	logger -st "ssr-rules[$$]" -p "$1" -- "$2"
 }
 
 # IP list normalization function (for comparison)

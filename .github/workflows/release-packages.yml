@@ -9,6 +9,10 @@ name: Release Packages
 env:
   TZ: Asia/Shanghai
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   prepare:
     name: Prepare Release
@@ -62,7 +66,6 @@ jobs:
     name: Build ${{ matrix.build_arch }}
     needs: prepare
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -123,11 +126,18 @@ jobs:
           rm -rf feeds/packages/lang/golang
           git -C feeds/packages restore --source=FETCH_HEAD --staged --worktree -- lang/golang
           rm -rf feeds/packages/net/xray-core
+          # These release SDKs use musl. The 25.12 metadata generator expands
+          # curl -> LDAP -> SASL -> glibc-only libcrypt into a Kconfig cycle.
+          # Drop the inapplicable dependency before regenerating feed metadata.
+          if [[ "${SDK_NAME}" == *_musl.* ]]; then
+            sed -i 's/+USE_GLIBC:libcrypt-compat//g' feeds/packages/libs/cyrus-sasl/Makefile
+          fi
           ./scripts/feeds update -i packages
-          ./scripts/feeds install -a
           echo "src-link helloworld $(pwd)/../source" >> feeds.conf
           ./scripts/feeds update helloworld
-          ./scripts/feeds install -a -p helloworld
+          # Install only release packages and their dependencies. Installing all
+          # feeds also imports unrelated, conflicting Kconfig options into SDKs.
+          ./scripts/feeds install -p helloworld luci-app-ssr-plus xray-core mihomo
           test -e package/feeds/helloworld/xray-core
           cat <<'EOF' > .config
           CONFIG_ALL_NONSHARED=n
@@ -156,26 +166,32 @@ jobs:
           CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_ShadowsocksR_Libev_Client=n
           CONFIG_PACKAGE_luci-app-ssr-plus_INCLUDE_ShadowsocksR_Libev_Server=n
           CONFIG_PACKAGE_xray-core=m
+          CONFIG_XRAY_CORE_NAIVE=y
           CONFIG_PACKAGE_mihomo=m
           CONFIG_PACKAGE_naiveproxy=n
           EOF
-          make defconfig
-          make clean
-          make download -j"$(nproc)" || true
+          mkdir -p logs
+          make defconfig 2>&1 | tee logs/defconfig.log
+          if grep -Eq 'recursive dependency detected|error:' logs/defconfig.log; then
+            exit 1
+          fi
+          for option in PACKAGE_luci-app-ssr-plus PACKAGE_luci-i18n-ssr-plus-zh-cn PACKAGE_xray-core PACKAGE_mihomo; do
+            grep -qx "CONFIG_${option}=m" .config
+          done
+          grep -qx 'CONFIG_XRAY_CORE_NAIVE=y' .config
+          ! grep -Eq '^CONFIG_PACKAGE_naiveproxy=[ym]$' .config
 
       - name: Compile packages
         id: compile
         run: |
           cd sdk
-          ./scripts/feeds update helloworld
-          ./scripts/feeds install -a -p helloworld
           test -e package/feeds/helloworld/xray-core
 
           packages=(luci-app-ssr-plus xray-core mihomo)
           for package in "${packages[@]}"; do
-            make "package/feeds/helloworld/${package}/clean"
-            if ! make "package/feeds/helloworld/${package}/compile" -j"$(nproc)"; then
-              make "package/feeds/helloworld/${package}/compile" -j1 V=s
+            make "package/feeds/helloworld/${package}/clean" -j1 V=s
+            if ! make "package/feeds/helloworld/${package}/compile" -j"$(nproc)" BUILD_LOG=1 2>&1 | tee "logs/${package}.log"; then
+              make "package/feeds/helloworld/${package}/compile" -j1 V=s BUILD_LOG=1 2>&1 | tee "logs/${package}-retry.log"
             fi
           done
 
@@ -229,13 +245,26 @@ jobs:
           name: helloworld-${{ matrix.build_arch }}
           path: dist/${{ matrix.build_arch }}
           retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.build_arch }}
+          include-hidden-files: true
+          path: |
+            sdk/logs/
+            sdk/.config
+            sdk/tmp/.config-package.in
+          retention-days: 7
 
   release:
     name: Publish Release
     needs:
       - prepare
       - build
-    if: ${{ always() && github.event_name == 'push' }}
+    if: ${{ success() && github.event_name == 'push' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -257,8 +286,20 @@ jobs:
           mkdir -p releases
           shopt -s nullglob
 
-          for dir in artifacts/*; do
-            [ -d "$dir" ] || continue
+          for arch in x64_ipk x64_apk arm64_generic_ipk arm64_generic_apk arm64_a53_ipk arm64_a53_apk; do
+            dir="artifacts/helloworld-${arch}"
+            ext="${arch##*_}"
+            for name in luci-app-ssr-plus luci-i18n-ssr-plus-zh-cn xray-core mihomo; do
+              if [ "$ext" = apk ]; then
+                matches=("$dir/$name"-*.apk)
+              else
+                matches=("$dir/$name"_*.ipk)
+              fi
+              if [ ${#matches[@]} -eq 0 ]; then
+                echo "Missing release package: ${arch}/${name}" >&2
+                exit 1
+              fi
+            done
 
             for package in "$dir"/*.ipk "$dir"/*.apk; do
               [ -f "$package" ] || continue
@@ -275,3 +316,4 @@ jobs:
           body_path: release-note/release_note.md
           prerelease: ${{ contains(needs.prepare.outputs.tag_name, '-beta') || contains(needs.prepare.outputs.tag_name, '-rc') }}
           files: releases/*
+          fail_on_unmatched_files: true

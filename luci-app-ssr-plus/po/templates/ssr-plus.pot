@@ -3360,10 +3360,6 @@ msgstr ""
 msgid "mihomo binary not found in archive"
 msgstr ""
 
-#: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:56
-msgid "naive binary not found in archive"
-msgstr ""
-
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client-config.lua:911
 msgid "native UDP characteristics"
 msgstr ""

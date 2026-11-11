@@ -3393,10 +3393,6 @@ msgstr "mKCP 伪装（混淆）类型"
 msgid "mihomo binary not found in archive"
 msgstr "压缩包中未找到 mihomo 二进制文件"
 
-#: applications/luci-app-ssr-plus/luasrc/view/shadowsocksr/component.htm:56
-msgid "naive binary not found in archive"
-msgstr "压缩包中未找到 naive 二进制文件"
-
 #: applications/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client-config.lua:911
 msgid "native UDP characteristics"
 msgstr "原生 UDP 特性"
